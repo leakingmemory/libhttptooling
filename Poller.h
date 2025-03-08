@@ -31,6 +31,8 @@ private:
 public:
     static std::shared_ptr<Poller> Create();
     void AddFd(int fd, bool read, bool write, bool err);
+    void UpdateFd(int fd, bool read, bool write);
+    void RemoveFd(int fd);
     void ClearFds();
     std::tuple<bool,bool,bool> GetResults(int fd);
     task<PollerResult> Poll(uint64_t timeoutMs);

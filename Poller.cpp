@@ -26,6 +26,36 @@ void Poller::AddFd(int fd, bool read, bool write, bool err) {
     pollfds.emplace_back(pfd);
 }
 
+void Poller::UpdateFd(int fd, bool read, bool write) {
+    for (auto &pfd : pollfds) {
+        if (pfd.fd == fd) {
+            if (read) {
+                pfd.events |= readFlags;
+            } else {
+                pfd.events &= ~readFlags;
+            }
+            if (write) {
+                pfd.events |= writeFlags;
+            } else {
+                pfd.events &= ~writeFlags;
+            }
+            return;
+        }
+    }
+}
+
+void Poller::RemoveFd(int fd) {
+    auto iterator = pollfds.begin();
+    while (iterator != pollfds.end()) {
+        const auto &pfd = *iterator;
+        if (pfd.fd == fd) {
+            iterator = pollfds.erase(iterator);
+            return;
+        }
+        ++iterator;
+    }
+}
+
 void Poller::ClearFds() {
     pollfds.clear();
 }

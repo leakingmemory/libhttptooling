@@ -43,7 +43,8 @@ task<void> NetwServer::ConnectionAcceptReady(const std::shared_ptr<NetwServer> &
     co_return;
 }
 
-task<void> NetwServer::ConnectionAcceptLoop(const std::shared_ptr<NetwServer> &selfptrIn) {
+task<void> NetwServer::ConnectionAcceptLoop(const std::shared_ptr<Poller> &pollerIn, const std::shared_ptr<NetwServer> &selfptrIn) {
+    std::shared_ptr<Poller> poller{pollerIn};
     std::shared_ptr<NetwServer> selfptr{selfptrIn};
     while (!selfptr->quitAccepting) {
         std::cout << "Waiting for connections\n";
@@ -52,8 +53,11 @@ task<void> NetwServer::ConnectionAcceptLoop(const std::shared_ptr<NetwServer> &s
             break;
         }
         auto clientFd = serverSocket.Accept();
-        if (clientFd) {
-            std::cout << "Accepted new connection\n";
+        if (clientFd.IsValid()) {
+            std::cout << "Accepted new connection " << clientFd << "\n";
+            NetwClient cl{.fd = std::move(clientFd), .inputBuffer = {}, .outputBuffer = {}};
+            auto &fd = clients.emplace_back(std::move(cl));
+            poller->AddFd(fd.fd, true, !fd.outputBuffer.empty(), true);
         } else {
             std::cout << "No new connection\n";
         }
@@ -105,6 +109,7 @@ task<void> NetwServer::CommandReadLoop(const std::shared_ptr<NetwServer> &selfpt
 task<void> NetwServer::PollLoop(const std::shared_ptr<NetwServer> &selfptrIn, const std::shared_ptr<Poller> &pollerInc) {
     std::shared_ptr<NetwServer> selfptr{selfptrIn};
     std::shared_ptr<Poller> poller{pollerInc};
+    std::string buf{};
     while (!quitPolling) {
         auto result = co_await poller->Poll(10000);
         switch (result) {
@@ -121,13 +126,55 @@ task<void> NetwServer::PollLoop(const std::shared_ptr<NetwServer> &selfptrIn, co
                             cb();
                         }
                     }
-                    std::vector<std::function<void()>> cbs{};
-                    for (const auto &cb: acceptReadyCallback) {
-                        cbs.emplace_back(cb);
+                    auto serverReadyTpl = poller->GetResults(serverSocket);
+                    auto serverReady = std::get<0>(serverReadyTpl) || std::get<2>(serverReadyTpl);
+                    if (serverReady) {
+                        std::vector<std::function<void()>> cbs{};
+                        for (const auto &cb: acceptReadyCallback) {
+                            cbs.emplace_back(cb);
+                        }
+                        acceptReadyCallback.clear();
+                        for (const auto &cb: cbs) {
+                            cb();
+                        }
                     }
-                    acceptReadyCallback.clear();
-                    for (const auto &cb: cbs) {
-                        cb();
+                    auto iterator = clients.begin();
+                    while (iterator != clients.end()) {
+                        auto &client = *iterator;
+                        auto fdReadyTpl = poller->GetResults(client.fd);
+                        if (std::get<1>(fdReadyTpl)) {
+                            try {
+                                auto wrCount = client.fd.Write(client.outputBuffer);
+                                if (wrCount > 0) {
+                                    client.outputBuffer.erase(0, wrCount);
+                                }
+                            } catch (const FdException &e) {
+                                std::cout<< "Error writing to socket, closing\n";
+                                poller->RemoveFd(client.fd);
+                                iterator = clients.erase(iterator);
+                                continue;
+                            }
+                        }
+                        if (std::get<0>(fdReadyTpl) || std::get<2>(fdReadyTpl)) {
+                            buf.resize(8192);
+                            try {
+                                auto rdCount = client.fd.Read(buf);
+                                if (rdCount > 0) {
+                                    std::cout << "Read " << rdCount << " bytes.\n";
+                                    buf.resize(rdCount);
+                                    client.inputBuffer.append(buf);
+                                }
+                            } catch (const FdException &e) {
+                                std::cout<< "Error reading from socket, closing\n";
+                                poller->RemoveFd(client.fd);
+                                iterator = clients.erase(iterator);
+                                continue;
+                            }
+                        }
+                        client.outputBuffer.append(client.inputBuffer);
+                        client.inputBuffer.clear();
+                        poller->UpdateFd(client.fd, true, !client.outputBuffer.empty());
+                        ++iterator;
                     }
                 }
                 break;
@@ -161,7 +208,7 @@ void NetwServer::Run() {
     AddCommand(*poller);
     AddServerSocket(*poller);
     auto shrptr = shared_from_this();
-    FireAndForget<task<void>>([shrptr] () -> task<void> { return shrptr->ConnectionAcceptLoop(shrptr); });
+    FireAndForget<task<void>>([shrptr, poller] () -> task<void> { return shrptr->ConnectionAcceptLoop(poller, shrptr); });
     FireAndForget<task<void>>([shrptr] () -> task<void> { return shrptr->CommandReadLoop(shrptr); });
     FireAndForget<task<void>>([shrptr, poller] () -> task<void> { return shrptr->PollLoop(shrptr, poller); });
     while (!quitLoop) {

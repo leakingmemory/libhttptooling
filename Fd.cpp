@@ -91,7 +91,7 @@ Fd Fd::Accept() {
     return {cfd};
 }
 
-size_t Fd::Write(const void *ptr, size_t size) {
+size_t Fd::Write(const void *ptr, size_t size) const {
     if (size <= 0) {
         return 0;
     }
@@ -106,7 +106,7 @@ size_t Fd::Write(const void *ptr, size_t size) {
     }
 }
 
-size_t Fd::Read(void *ptr, size_t size) {
+size_t Fd::Read(void *ptr, size_t size) const {
     if (size <= 0) {
         return 0;
     }

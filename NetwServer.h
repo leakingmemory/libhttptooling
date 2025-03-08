@@ -11,10 +11,16 @@
 
 class Poller;
 
+struct NetwClient {
+    Fd fd;
+    std::string inputBuffer;
+    std::string outputBuffer;
+};
+
 class NetwServer : public std::enable_shared_from_this<NetwServer> {
 private:
     Fd commandInput, commandMonitor, serverSocket;
-    std::vector<Fd> clients{};
+    std::vector<NetwClient> clients{};
     std::string commandBuffer;
     std::vector<std::function<void ()>> acceptReadyCallback{};
     std::vector<std::function<void ()>> commandReadyCallback{};
@@ -34,7 +40,7 @@ public:
 private:
     void HandleCommand();
     task<void> ConnectionAcceptReady(const std::shared_ptr<NetwServer> &selfptrIn);
-    task<void> ConnectionAcceptLoop(const std::shared_ptr<NetwServer> &selfptr);
+    task<void> ConnectionAcceptLoop(const std::shared_ptr<Poller> &poller, const std::shared_ptr<NetwServer> &selfptr);
     task<void> CommandReady(const std::shared_ptr<NetwServer> &selfptrIn);
     task<void> CommandReadLoop(const std::shared_ptr<NetwServer> &selfptr);
     task<void> PollLoop(const std::shared_ptr<NetwServer> &selfptr, const std::shared_ptr<Poller> &pollerInc);
