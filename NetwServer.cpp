@@ -224,6 +224,12 @@ task<void> NetwServer::PollLoop(const std::shared_ptr<NetwServer> &selfptrIn, co
                                 if (wrCount > 0) {
                                     client.outputBuffer.erase(0, wrCount);
                                 }
+                                if (client.outputBuffer.empty() && client.closeSocket) {
+                                    std::cout << "Finished writing to socket, closing\n";
+                                    poller->RemoveFd(client.fd);
+                                    iterator = clients.erase(iterator);
+                                    continue;
+                                }
                             } catch (const FdException &e) {
                                 std::cout<< "Error writing to socket, closing\n";
                                 poller->RemoveFd(client.fd);
