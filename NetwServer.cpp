@@ -6,8 +6,15 @@
 #include "Poller.h"
 #include "include/sync_coroutine.h"
 #include <iostream>
+extern "C" {
+#include <unistd.h>
+}
 
-NetwServer::NetwServer(int port) {
+size_t NetwConnectionHandlerHandle::AcceptInput(const std::string &input) {
+    return handler->AcceptInput(input);
+}
+
+NetwServer::NetwServer(int port, const std::shared_ptr<NetwProtocolHandler> &netwProtocolHandler) : outputBuffers(std::make_shared<NetwFdOutputStruct>()), netwProtocolHandler(netwProtocolHandler) {
     auto pipefds = Fd::Pipe(true, true);
     commandInput = std::move(std::get<0>(pipefds));
     commandMonitor = std::move(std::get<1>(pipefds));
@@ -17,17 +24,51 @@ NetwServer::NetwServer(int port) {
     serverSocket.SetNonblocking();
 }
 
-std::shared_ptr<NetwServer> NetwServer::Create(int port) {
-    std::shared_ptr<NetwServer> server{new NetwServer(port)};
+std::shared_ptr<NetwServer> NetwServer::Create(int port, const std::shared_ptr<NetwProtocolHandler> &netwProtocolHandler) {
+    std::shared_ptr<NetwServer> server{new NetwServer(port, netwProtocolHandler)};
     return server;
 }
 
-void NetwServer::HandleCommand() {
+void NetwServer::HandleCommand(Poller &poller, NetwFdOutputStruct &outputBuffers) {
     while (!commandBuffer.empty()) {
         auto ch = commandBuffer[0];
         commandBuffer.erase(0);
         if (ch == 'q') {
             quitCommandReceived = true;
+        } else if (ch == 'w') {
+            std::vector<NetwFdOutput> buffers{};
+            {
+                std::lock_guard lock{outputBuffers.mtx};
+                for (auto &buffer : outputBuffers.buffers) {
+                    buffers.emplace_back(std::move(buffer));
+                }
+                outputBuffers.buffers.clear();
+                outputBuffers.signaled = false;
+            }
+            for (auto &buffer : buffers) {
+                auto iterator = clients.begin();
+                while (iterator != clients.end()) {
+                    auto &clientFd = *iterator;
+                    if (buffer.id == clientFd.id) {
+                        if (!buffer.chunk.empty()) {
+                            clientFd.outputBuffer.append(buffer.chunk);
+                        }
+                        bool closed{false};
+                        if (buffer.close) {
+                            if (!clientFd.outputBuffer.empty()) {
+                                clientFd.closeSocket = true;
+                            } else {
+                                poller.RemoveFd(clientFd.fd);
+                                iterator = clients.erase(iterator);
+                                break;
+                            }
+                        }
+                        poller.UpdateFd(clientFd.fd, true, !clientFd.outputBuffer.empty());
+                        break;
+                    }
+                    ++iterator;
+                }
+            }
         } else {
             std::cerr << "Invalid internal command: " << ch << "\n";
         }
@@ -43,9 +84,13 @@ task<void> NetwServer::ConnectionAcceptReady(const std::shared_ptr<NetwServer> &
     co_return;
 }
 
+static uint64_t netwClientId{0};
+
 task<void> NetwServer::ConnectionAcceptLoop(const std::shared_ptr<Poller> &pollerIn, const std::shared_ptr<NetwServer> &selfptrIn) {
     std::shared_ptr<Poller> poller{pollerIn};
     std::shared_ptr<NetwServer> selfptr{selfptrIn};
+    std::shared_ptr<NetwFdOutputStruct> outputBuffers{this->outputBuffers};
+    int commandFd = commandInput;
     while (!selfptr->quitAccepting) {
         std::cout << "Waiting for connections\n";
         co_await ConnectionAcceptReady(selfptr);
@@ -55,7 +100,36 @@ task<void> NetwServer::ConnectionAcceptLoop(const std::shared_ptr<Poller> &polle
         auto clientFd = serverSocket.Accept();
         if (clientFd.IsValid()) {
             std::cout << "Accepted new connection " << clientFd << "\n";
-            NetwClient cl{.fd = std::move(clientFd), .inputBuffer = {}, .outputBuffer = {}};
+            uint64_t id{netwClientId++};
+            NetwClient cl{.id = id, .fd = std::move(clientFd), .inputBuffer = {}, .outputBuffer = {}, .handle = {netwProtocolHandler, netwProtocolHandler->Create([id, commandFd, outputBuffers] (const std::string &output) {
+                NetwFdOutput buffer{.id = id, .chunk = output, .close = false};
+                bool signal{false};
+                {
+                    std::lock_guard lock{outputBuffers->mtx};
+                    outputBuffers->buffers.emplace_back(std::move(buffer));
+                    signal = !outputBuffers->signaled;
+                    if (signal) {
+                        outputBuffers->signaled = true;
+                    }
+                }
+                if (signal) {
+                    write(commandFd, "w", 1);
+                }
+            }, [id, commandFd, outputBuffers] () {
+                NetwFdOutput buffer{.id = id, .chunk = {}, .close = true};
+                bool signal{false};
+                {
+                    std::lock_guard lock{outputBuffers->mtx};
+                    outputBuffers->buffers.emplace_back(std::move(buffer));
+                    signal = !outputBuffers->signaled;
+                    if (signal) {
+                        outputBuffers->signaled = true;
+                    }
+                }
+                if (signal) {
+                    write(commandFd, "w", 1);
+                }
+            })}};
             auto &fd = clients.emplace_back(std::move(cl));
             poller->AddFd(fd.fd, true, !fd.outputBuffer.empty(), true);
         } else {
@@ -75,8 +149,10 @@ task<void> NetwServer::CommandReady(const std::shared_ptr<NetwServer> &selfptrIn
     co_return;
 }
 
-task<void> NetwServer::CommandReadLoop(const std::shared_ptr<NetwServer> &selfptrIn) {
+task<void> NetwServer::CommandReadLoop(const std::shared_ptr<Poller> &pollerIn, const std::shared_ptr<NetwServer> &selfptrIn) {
+    std::shared_ptr<Poller> poller{pollerIn};
     std::shared_ptr<NetwServer> selfptr{selfptrIn};
+    std::shared_ptr<NetwFdOutputStruct> outputBuffers{this->outputBuffers};
     std::string buffer{};
     while (!selfptr->quitCommandReceived) {
         std::cout << "Await command input\n";
@@ -87,7 +163,7 @@ task<void> NetwServer::CommandReadLoop(const std::shared_ptr<NetwServer> &selfpt
             if (len > 0) {
                 buffer.resize(len);
                 commandBuffer.append(buffer);
-                selfptr->HandleCommand();
+                selfptr->HandleCommand(*poller, *outputBuffers);
             }
         } catch (std::exception &e) {
             std::cerr << "Internal command interface failure: " << e.what() << "\n";
@@ -171,8 +247,12 @@ task<void> NetwServer::PollLoop(const std::shared_ptr<NetwServer> &selfptrIn, co
                                 continue;
                             }
                         }
-                        client.outputBuffer.append(client.inputBuffer);
-                        client.inputBuffer.clear();
+                        if (!client.inputBuffer.empty()) {
+                            auto consumed = client.handle.AcceptInput(client.inputBuffer);
+                            if (consumed > 0) {
+                                client.inputBuffer.erase(0, consumed);
+                            }
+                        }
                         poller->UpdateFd(client.fd, true, !client.outputBuffer.empty());
                         ++iterator;
                     }
@@ -209,7 +289,7 @@ void NetwServer::Run() {
     AddServerSocket(*poller);
     auto shrptr = shared_from_this();
     FireAndForget<task<void>>([shrptr, poller] () -> task<void> { return shrptr->ConnectionAcceptLoop(poller, shrptr); });
-    FireAndForget<task<void>>([shrptr] () -> task<void> { return shrptr->CommandReadLoop(shrptr); });
+    FireAndForget<task<void>>([shrptr, poller] () -> task<void> { return shrptr->CommandReadLoop(poller, shrptr); });
     FireAndForget<task<void>>([shrptr, poller] () -> task<void> { return shrptr->PollLoop(shrptr, poller); });
     while (!quitLoop) {
         poller->Runner();
