@@ -20,13 +20,19 @@ private:
     uint32_t magic{DEBUG_LF_MAG};
 #endif
 public:
-    func_task(const std::function<void (const std::function<void (T)> &)> &funcAwait) : funcAwait(funcAwait) {
+    constexpr func_task() : funcAwait(), value_() {
+    }
+    constexpr func_task(const std::function<void (const std::function<void (T)> &)> &funcAwait) : funcAwait(funcAwait) {
         value_ = std::make_shared<T>();
     }
-    func_task(std::function<void (const std::function<void (T)> &)> &&funcAwait) : funcAwait(std::move(funcAwait)) {
+    constexpr func_task(std::function<void (const std::function<void (T)> &)> &&funcAwait) : funcAwait(std::move(funcAwait)) {
         value_ = std::make_shared<T>();
     }
-    ~func_task() {
+    func_task(const func_task &) = delete;
+    constexpr func_task(func_task &&) = default;
+    func_task &operator = (const func_task &) = delete;
+    constexpr func_task &operator = (func_task &&) = default;
+    constexpr ~func_task() {
 #ifdef DEBUG_LF_MAG
         if (magic != DEBUG_LF_MAG) {
             std::terminate();
@@ -34,10 +40,10 @@ public:
         magic = 0;
 #endif
     }
-    bool await_ready() noexcept {
+    constexpr bool await_ready() const noexcept {
         return false;
     }
-    void await_suspend(std::coroutine_handle<> h) {
+    constexpr void await_suspend(std::coroutine_handle<> h) {
 #ifdef DEBUG_LF_MAG
         if (magic != DEBUG_LF_MAG) {
             std::terminate();
@@ -49,7 +55,7 @@ public:
             h.resume();
         });
     }
-    T await_resume() {
+    constexpr T await_resume() const {
 #ifdef DEBUG_LF_MAG
         if (magic != DEBUG_LF_MAG) {
             std::terminate();
@@ -66,9 +72,9 @@ private:
     uint32_t magic{DEBUG_LF_MAG};
 #endif
 public:
-    func_task(const std::function<void (const std::function<void ()> &)> &funcAwait) : funcAwait(funcAwait) {}
-    func_task(std::function<void (const std::function<void ()> &)> &&funcAwait) : funcAwait(std::move(funcAwait)) {}
-    ~func_task() {
+    constexpr func_task(const std::function<void (const std::function<void ()> &)> &funcAwait) : funcAwait(funcAwait) {}
+    constexpr func_task(std::function<void (const std::function<void ()> &)> &&funcAwait) : funcAwait(std::move(funcAwait)) {}
+    constexpr ~func_task() {
 #ifdef DEBUG_LF_MAG
         if (magic != DEBUG_LF_MAG) {
             std::terminate();
@@ -76,7 +82,7 @@ public:
         magic = 0;
 #endif
     }
-    bool await_ready() noexcept {
+    constexpr bool await_ready() const noexcept {
         return false;
     }
     void await_suspend(std::coroutine_handle<> h) {
@@ -89,7 +95,7 @@ public:
             h.resume();
         });
     }
-    void await_resume() {
+    constexpr void await_resume() const {
 #ifdef DEBUG_LF_MAG
         if (magic != DEBUG_LF_MAG) {
             std::terminate();
