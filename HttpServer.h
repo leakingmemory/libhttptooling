@@ -47,7 +47,10 @@ class HttpServerConnectionHandler;
 class HttpRequest {
 public:
     virtual ~HttpRequest() = default;
+    virtual std::string GetMethod() const = 0;
+    virtual std::string GetPath() const = 0;
     virtual void Respond(const std::shared_ptr<HttpResponse> &) = 0;
+    virtual task<std::string> RequestBody() = 0;
 };
 
 class HttpServer : public NetwProtocolHandler, public std::enable_shared_from_this<HttpServer> {

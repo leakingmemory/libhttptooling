@@ -15,13 +15,22 @@ void signal_handler(int signal) {
     write(commandFd, "q", 1);
 }
 
+#include <iostream>
 task<void> HttpServerLoop(const std::shared_ptr<HttpServer> &serverIn) {
     std::shared_ptr<HttpServer> server{serverIn};
     while (true) {
         auto req = co_await server->NextRequest();
-        auto response = std::make_shared<HttpResponse>(404, "Not found");
-        response->SetContent("Not found", "text/plain");
-        req->Respond(response);
+        if (req->GetMethod() == "POST") {
+            auto response = std::make_shared<HttpResponse>(200, "OK");
+            auto reqBody = co_await req->RequestBody();
+            response->SetContent(reqBody, "text/plain");
+            std::cout << "Responding to body of size " << reqBody.size() << "\n";
+            req->Respond(response);
+        } else {
+            auto response = std::make_shared<HttpResponse>(404, "Not found");
+            response->SetContent("Not found\r\n", "text/plain");
+            req->Respond(response);
+        }
     }
 }
 
