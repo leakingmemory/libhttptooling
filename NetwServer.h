@@ -18,10 +18,13 @@ public:
     virtual size_t AcceptInput(const std::string &) = 0;
 };
 
+class NetwServer;
+
 class NetwProtocolHandler {
 public:
     virtual NetwConnectionHandler *Create(const std::function<void (const std::string &)> &output, const std::function<void ()> &close) = 0;
     virtual void Release(NetwConnectionHandler *) = 0;
+    virtual void SetAssociatedNetwServer(const std::weak_ptr<NetwServer> &) = 0;
 };
 
 class NetwConnectionHandlerHandle {
@@ -82,12 +85,14 @@ struct NetwFdOutputStruct {
 class NetwServer : public std::enable_shared_from_this<NetwServer> {
 private:
     Fd commandInput, commandMonitor, serverSocket;
-    std::vector<NetwClient> clients{};
+    std::vector<std::shared_ptr<NetwClient>> clients{};
     std::shared_ptr<NetwProtocolHandler> netwProtocolHandler{};
     std::shared_ptr<NetwFdOutputStruct> outputBuffers{};
     std::string commandBuffer;
     std::vector<std::function<void ()>> acceptReadyCallback{};
     std::vector<std::function<void ()>> commandReadyCallback{};
+    std::shared_ptr<Poller> poller{};
+    std::mutex mtx{};
     bool quitCommandReceived{false};
     bool quitAccepting{false};
     bool quitPolling{false};
@@ -95,12 +100,14 @@ private:
 protected:
     NetwServer() = delete;
     NetwServer(int port, const std::shared_ptr<NetwProtocolHandler> &netwProtocolHandler);
+    NetwServer(const std::shared_ptr<NetwProtocolHandler> &netwProtocolHandler);
 public:
     NetwServer(const NetwServer &) = delete;
     NetwServer(NetwServer &&) = delete;
     NetwServer &operator =(const NetwServer &) = delete;
     NetwServer &operator =(NetwServer &&) = delete;
     static std::shared_ptr<NetwServer> Create(int port, const std::shared_ptr<NetwProtocolHandler> &netwProtocolHandler);
+    static std::shared_ptr<NetwServer> Create(const std::shared_ptr<NetwProtocolHandler> &netwProtocolHandler);
 private:
     void HandleCommand(Poller &poller, NetwFdOutputStruct &outputBuffers);
     task<void> ConnectionAcceptReady(const std::shared_ptr<NetwServer> &selfptrIn);
@@ -112,6 +119,7 @@ private:
     void AddServerSocket(Poller &) const;
 public:
     int GetCommandFd() const;
+    void Connect(const void *ipaddr_norder, size_t ipaddr_len, int port, const std::string &requestData, const std::function<void (NetwConnectionHandler *)> &);
     void Run();
 };
 

@@ -490,7 +490,7 @@ public:
     constexpr Http1ResponseLine GetResponseLine() const {
         return responseLine;
     }
-    constexpr std::vector<Http1HeaderLine> GetHeaderLines() const {
+    constexpr std::vector<Http1HeaderLine> GetHeader() const {
         return headerLines;
     }
     constexpr operator std::string () const {

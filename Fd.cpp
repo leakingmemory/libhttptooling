@@ -3,6 +3,7 @@
 //
 
 #include "Fd.h"
+#include <cstring>
 extern "C" {
 #include <unistd.h>
 #include <fcntl.h>
@@ -12,7 +13,7 @@ extern "C" {
 };
 
 const char *FdException::what() const noexcept {
-    return "File descriptor operation faled";
+    return errorMsg.c_str();
 }
 
 Fd::Fd(int fd) : fd(fd) {}
@@ -70,6 +71,28 @@ void Fd::BindListen(int port) {
 void Fd::Listen(int backlog) {
     if (listen(fd, backlog) != 0) {
         throw FdException();
+    }
+}
+
+void Fd::Connect(const void *ipaddr_norder, size_t ipaddr_size, int port) {
+    int err;
+    if (ipaddr_size == 4) {
+        struct sockaddr_in addr4{};
+        addr4.sin_family = AF_INET;
+        memcpy(&(addr4.sin_addr), ipaddr_norder, 4);
+        addr4.sin_port = htons(port);
+        err = connect(fd, (struct sockaddr *) &addr4, sizeof(addr4));
+    } else if (ipaddr_size == 16) {
+        struct sockaddr_in6 addr6{};
+        addr6.sin6_family = AF_INET6;
+        memcpy(&(addr6.sin6_addr), ipaddr_norder, 16);
+        addr6.sin6_port = htons(port);
+        err = connect(fd, (struct sockaddr *) &addr6, sizeof(addr6));
+    } else {
+        throw FdException("Unexpected address size");
+    }
+    if (err < 0) {
+        throw FdException("connect() failed");
     }
 }
 

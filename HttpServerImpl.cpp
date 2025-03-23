@@ -5,131 +5,11 @@
 #include "HttpServerImpl.h"
 #include "Http1Protocol.h"
 #include "HttpHeaders.h"
-
-class HttpServerConnectionHandler;
-
-struct HttpServerResponseContainer {
-    std::weak_ptr<HttpServerConnectionHandler> handler{};
-    std::string output{};
-    bool completed{false};
-};
-
-class HttpRequestImpl;
-
-class HttpServerConnectionHandler : public NetwConnectionHandler, public std::enable_shared_from_this<HttpServerConnectionHandler> {
-private:
-    std::weak_ptr<HttpServerImpl> httpServer;
-    std::function<void(const std::string &)> output;
-    std::function<void()> close;
-    Http1Request requestHead{};
-    std::vector<std::shared_ptr<HttpServerResponseContainer>> inflightRequests{};
-    std::shared_ptr<HttpRequestImpl> requestBodyPending{};
-    size_t requestBodyRemaining{0};
-    std::mutex mtx;
-    bool closeConnection{};
-public:
-    HttpServerConnectionHandler(const std::shared_ptr<HttpServerImpl> &httpServer, const std::function<void(const std::string &)> &output, const std::function<void()> &close) : httpServer(httpServer), output(output), close(close) {}
-    size_t AcceptInput(const std::string &) override;
-    void RunOutputs();
-};
-
-class HttpRequestImpl : public HttpRequest, public std::enable_shared_from_this<HttpRequestImpl> {
-private:
-    std::weak_ptr<HttpServerConnectionHandler> serverConnectionHandler;
-    std::weak_ptr<HttpServerResponseContainer> serverResponseContainer;
-    std::string method{};
-    std::string path{};
-    std::mutex mtx{};
-    std::string requestBody{};
-    std::vector<std::function<void ()>> callRequestBodyFinished{};
-    bool requestBodyComplete;
-public:
-    HttpRequestImpl(const std::shared_ptr<HttpServerConnectionHandler> &serverConnectionHandler, std::shared_ptr<HttpServerResponseContainer> &serverResponseContainer, const std::string &method, const std::string &path, bool hasRequestBody) : serverConnectionHandler(serverConnectionHandler), serverResponseContainer(serverResponseContainer), method(method), path(path), requestBodyComplete(!hasRequestBody) {
-        std::transform(this->method.cbegin(), this->method.cend(), this->method.begin(), [] (char ch) {return std::toupper(ch);});
-    }
-    std::string GetMethod() const override;
-    std::string GetPath() const override;
-    void Respond(const std::shared_ptr<HttpResponse> &) override;
-    task<std::string> RequestBody() override;
-    void RecvBody(const std::string &chunk);
-    void CompletedBody();
-};
-
-std::string HttpRequestImpl::GetMethod() const {
-    return method;
-}
-
-std::string HttpRequestImpl::GetPath() const {
-    return path;
-}
-
-void HttpRequestImpl::Respond(const std::shared_ptr<HttpResponse> &response) {
-    auto serverConnectionHandler = this->serverConnectionHandler.lock();
-    auto serverResponseContainer = this->serverResponseContainer.lock();
-    if (serverResponseContainer) {
-        std::vector<Http1HeaderLine> hdrLns{};
-        hdrLns.emplace_back("Content-Type", response->GetContentType());
-        hdrLns.emplace_back("Content-Length", std::to_string(response->GetContentLength()));
-
-        Http1Response responseHead{{"HTTP/1.1", response->GetCode(), response->GetDescription()}, hdrLns};
-        serverResponseContainer->output.append(responseHead.operator std::string());
-        serverResponseContainer->output.append(response->GetContent());
-        serverResponseContainer->completed = true;
-        if (serverConnectionHandler) {
-            serverConnectionHandler->RunOutputs();
-        }
-    }
-}
-
-void HttpRequestImpl::RecvBody(const std::string &chunk) {
-    std::lock_guard lock{mtx};
-    requestBody.append(chunk);
-}
-
-void HttpRequestImpl::CompletedBody() {
-    {
-        std::lock_guard lock{mtx};
-        requestBodyComplete = true;
-    }
-    for (const auto &cl : callRequestBodyFinished) {
-        cl();
-    }
-}
-
-task<std::string> HttpRequestImpl::RequestBody() {
-    {
-        std::unique_lock lock{mtx};
-        if (!requestBodyComplete) {
-            lock.unlock();
-            std::weak_ptr<HttpRequestImpl> reqObj{shared_from_this()};
-            func_task<std::string> fnTask{[reqObj] (const auto &func) {
-                auto req = reqObj.lock();
-                std::unique_lock lock{req->mtx};
-                if (req->requestBodyComplete) {
-                    lock.unlock();
-                    func(req->requestBody);
-                    return;
-                }
-                req->callRequestBodyFinished.emplace_back([reqObj, func] () {
-                    auto req = reqObj.lock();
-                    if (req) {
-                        func(req->requestBody);
-                    } else {
-                        func("");
-                    }
-                });
-            }};
-            auto reqBody = co_await fnTask;
-            co_return reqBody;
-        }
-    }
-    co_return requestBody;
-}
+#include "HttpServerResponseContainer.h"
+#include "HttpServerConnectionHandler.h"
+#include "HttpRequestImpl.h"
 
 size_t HttpServerConnectionHandler::AcceptInput(const std::string &input) {
-    if (closeConnection) {
-        return input.size();
-    }
     if (requestBodyRemaining > 0) {
         if (input.size() <= requestBodyRemaining) {
             requestBodyPending->RecvBody(input);
@@ -148,6 +28,9 @@ size_t HttpServerConnectionHandler::AcceptInput(const std::string &input) {
             requestBodyPending = {};
             return len;
         }
+    }
+    if (closeConnection) {
+        return input.size();
     }
     Http1RequestParser parser{input};
     if (parser.IsValid()) {
@@ -272,6 +155,9 @@ HttpServerImpl::Create(const std::function<void(const std::string &)> &output, c
 
 void HttpServerImpl::Release(NetwConnectionHandler *handler) {
     delete handler;
+}
+
+void HttpServerImpl::SetAssociatedNetwServer(const std::weak_ptr<NetwServer> &) {
 }
 
 task<std::shared_ptr<HttpRequest>> HttpServerImpl::NextRequest() {

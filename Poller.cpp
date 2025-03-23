@@ -23,10 +23,12 @@ void Poller::AddFd(int fd, bool read, bool write, bool err) {
         .events = flags,
         .revents = 0
     };
+    std::lock_guard lock{pollingMtx};
     pollfds.emplace_back(pfd);
 }
 
 void Poller::UpdateFd(int fd, bool read, bool write) {
+    std::lock_guard lock{pollingMtx};
     for (auto &pfd : pollfds) {
         if (pfd.fd == fd) {
             if (read) {
@@ -45,6 +47,7 @@ void Poller::UpdateFd(int fd, bool read, bool write) {
 }
 
 void Poller::RemoveFd(int fd) {
+    std::lock_guard lock{pollingMtx};
     auto iterator = pollfds.begin();
     while (iterator != pollfds.end()) {
         const auto &pfd = *iterator;
@@ -57,10 +60,12 @@ void Poller::RemoveFd(int fd) {
 }
 
 void Poller::ClearFds() {
+    std::lock_guard lock{pollingMtx};
     pollfds.clear();
 }
 
 std::tuple<bool, bool, bool> Poller::GetResults(int fd) {
+    std::lock_guard lock{pollingMtx};
     auto iterator = results.find(fd);
     if (iterator != results.end()) {
         return iterator->second;
@@ -84,16 +89,26 @@ task<PollerResult> Poller::Poll(uint64_t timeoutMs) {
                 uint64_t ns = timeoutMs % 1000;
                 ns *= 1000000;
                 struct timespec tm{.tv_sec = (time_t) seconds, .tv_nsec = (long) ns};
-                selfptr->results.clear();
-                auto err = ppoll(selfptr->pollfds.data(), selfptr->pollfds.size(), &tm, &sigmask);
-                if (err > 0) {
-                    for (const auto &fd : selfptr->pollfds) {
-                        bool read = (fd.revents & readFlags) != 0;
-                        bool write = (fd.revents & writeFlags) != 0;
-                        bool err = (fd.revents & errFlagsReport) != 0;
-                        if (read || write || err) {
-                            auto tuple = std::make_tuple<bool,bool,bool>(read ? true : false, write ? true : false, err ? true : false);
-                            selfptr->results.insert_or_assign(fd.fd, tuple);
+                std::vector<pollfd> pollfds{};
+                {
+                    std::lock_guard lock{selfptr->pollingMtx};
+                    selfptr->results.clear();
+                    pollfds = selfptr->pollfds;
+                }
+                auto err = ppoll(pollfds.data(), pollfds.size(), &tm, &sigmask);
+                {
+                    std::lock_guard lock{selfptr->pollingMtx};
+                    if (err > 0) {
+                        for (const auto &fd: pollfds) {
+                            bool read = (fd.revents & readFlags) != 0;
+                            bool write = (fd.revents & writeFlags) != 0;
+                            bool err = (fd.revents & errFlagsReport) != 0;
+                            if (read || write || err) {
+                                auto tuple = std::make_tuple<bool, bool, bool>(read ? true : false,
+                                                                               write ? true : false,
+                                                                               err ? true : false);
+                                selfptr->results.insert_or_assign(fd.fd, tuple);
+                            }
                         }
                     }
                 }

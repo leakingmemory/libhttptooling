@@ -27,6 +27,7 @@ private:
     std::vector<std::function<void ()>> runQueue{};
     std::counting_semaphore<16384> runQueueSemaphore{0};
     std::mutex runQueueMutex{};
+    std::mutex pollingMtx{};
     Poller() = default;
 public:
     static std::shared_ptr<Poller> Create();

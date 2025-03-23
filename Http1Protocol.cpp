@@ -75,9 +75,9 @@ static_assert(Http1ResponseParser("HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n
 static_assert(Http1ResponseParser("HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n").operator Http1Response().GetResponseLine().GetVersion() == "HTTP/1.1");
 static_assert(Http1ResponseParser("HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n").operator Http1Response().GetResponseLine().GetCode() == 200);
 static_assert(Http1ResponseParser("HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n").operator Http1Response().GetResponseLine().GetDescription() == "OK");
-static_assert(Http1ResponseParser("HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n").operator Http1Response().GetHeaderLines().size() == 1);
-static_assert(Http1ResponseParser("HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n").operator Http1Response().GetHeaderLines()[0].GetHeader() == "Content-Length");
-static_assert(Http1ResponseParser("HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n").operator Http1Response().GetHeaderLines()[0].GetValue() == "13");
+static_assert(Http1ResponseParser("HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n").operator Http1Response().GetHeader().size() == 1);
+static_assert(Http1ResponseParser("HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n").operator Http1Response().GetHeader()[0].GetHeader() == "Content-Length");
+static_assert(Http1ResponseParser("HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\n").operator Http1Response().GetHeader()[0].GetValue() == "13");
 static_assert(Http1ResponseParser("HTTP/1.1 200 OK\nContent-Length: 13\n\n").IsValid());
 static_assert(!Http1ResponseParser("HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r").IsValid());
 static_assert(Http1ResponseParser("HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r").IsTruncated());

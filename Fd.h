@@ -8,9 +8,14 @@
 
 #include <tuple>
 #include <exception>
+#include <string>
 
-class FdException : std::exception {
+class FdException : public std::exception {
+private:
+    std::string errorMsg;
 public:
+    FdException() : errorMsg("Input output error") {}
+    FdException(const std::string &errorMsg) : errorMsg(errorMsg) {}
     const char * what() const noexcept override;
 };
 
@@ -36,6 +41,7 @@ public:
     static Fd InetSocket();
     void BindListen(int port);
     void Listen(int backlog);
+    void Connect(const void *ipaddr_norder, size_t ipaddr_size, int port);
     void SetNonblocking();
     Fd Accept();
 protected:

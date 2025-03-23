@@ -6,6 +6,7 @@
 #define LIBHTTPTOOLING_HTTPRESPONSE_H
 
 #include <string>
+#include "include/task.h"
 
 class HttpResponse {
 private:
@@ -39,6 +40,7 @@ public:
         this->content = std::move(content);
         this->contentType = std::move(contentType);
     }
+    virtual task<std::string> ResponseBody();
 };
 
 #endif //LIBHTTPTOOLING_HTTPRESPONSE_H

@@ -24,8 +24,17 @@ add_executable(httptooling main.cpp
         HttpHeaders.h
         HttpServer.cpp
         HttpServer.h
+        HttpResponse.cpp
         HttpResponse.h
-        HttpRequest.h)
+        HttpRequest.h
+        HttpClientImpl.cpp
+        HttpClientImpl.h
+        HttpRequestImpl.cpp
+        HttpRequestImpl.h
+        HttpServerResponseContainer.h
+        HttpServerConnectionHandler.h
+        HttpClient.cpp
+        HttpClient.h)
 target_link_libraries(httptooling PRIVATE -lpthread)
 #set_target_properties(httptooling PROPERTIES SOVERSION 1 VERSION 1.0.0)
 #target_link_libraries(httptooling PRIVATE /usr/local/lib/libcoro.so)
