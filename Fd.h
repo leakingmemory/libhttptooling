@@ -19,6 +19,11 @@ public:
     const char * what() const noexcept override;
 };
 
+class EofException : public FdException {
+public:
+    EofException() : FdException("End of file") {}
+};
+
 class Fd {
 private:
     int fd;

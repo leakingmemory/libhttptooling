@@ -7,6 +7,7 @@
 extern "C" {
 #include <unistd.h>
 }
+#include <thread>
 
 HttpServer::HttpServer(int port) :
     serverImpl(std::make_shared<HttpServerImpl>()),
@@ -24,7 +25,7 @@ task<std::shared_ptr<HttpRequest>> HttpServer::NextRequest() {
 }
 
 void HttpServer::Stop() {
-    write(commandFd, "q", 1);
+    int res = write(commandFd, "q", 1);
 }
 
 void HttpServer::Run() {

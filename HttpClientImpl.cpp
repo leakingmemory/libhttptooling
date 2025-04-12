@@ -32,6 +32,7 @@ private:
 public:
     HttpClientConnectionHandler(const std::shared_ptr<HttpClientImpl> &httpServer, const std::function<void(const std::string &)> &output, const std::function<void()> &close) : httpClient(httpClient), output(output), close(close) {}
     size_t AcceptInput(const std::string &) override;
+    void EndOfConnection() override;
     void WaitForResponse(const std::string &requestMethod, const std::function<void (std::shared_ptr<HttpResponse> &response)> &callback);
 };
 
@@ -41,36 +42,38 @@ private:
     std::weak_ptr<HttpClientRequestContainer> clientRequestContainer;
     std::mutex mtx{};
     std::string responseBody{};
+    bool responseBodyOk{true};
     std::vector<std::function<void ()>> callResponseBodyFinished{};
     bool responseBodyComplete;
 public:
     HttpResponseImpl(const std::shared_ptr<HttpClientConnectionHandler> &clientConnectionHandler, std::shared_ptr<HttpClientRequestContainer> &clientRequestContainer, int code, const std::string &description, bool hasResponseBody) : HttpResponse(code, description), clientConnectionHandler(clientConnectionHandler), clientRequestContainer(clientRequestContainer), responseBodyComplete(!hasResponseBody) {
     }
-    task<std::string> ResponseBody() override;
+    task<ResponseBodyResult> ResponseBody() override;
     void RecvBody(const std::string &chunk);
     void CompletedBody();
+    void FailedBody();
 };
 
-task<std::string> HttpResponseImpl::ResponseBody() {
+task<ResponseBodyResult> HttpResponseImpl::ResponseBody() {
     {
         std::unique_lock lock{mtx};
         if (!responseBodyComplete) {
             lock.unlock();
             std::weak_ptr<HttpResponseImpl> respObj{shared_from_this()};
-            func_task<std::string> fnTask{[respObj] (const auto &func) {
+            func_task<ResponseBodyResult> fnTask{[respObj] (const auto &func) {
                 auto resp = respObj.lock();
                 std::unique_lock lock{resp->mtx};
                 if (resp->responseBodyComplete) {
                     lock.unlock();
-                    func(resp->responseBody);
+                    func({.body = resp->responseBody, .success = resp->responseBodyOk});
                     return;
                 }
                 resp->callResponseBodyFinished.emplace_back([respObj, func] () {
                     auto resp = respObj.lock();
                     if (resp) {
-                        func(resp->responseBody);
+                        func({.body = resp->responseBody, .success = resp->responseBodyOk});
                     } else {
-                        func("");
+                        func({.body = "", .success = false});
                     }
                 });
             }};
@@ -78,7 +81,7 @@ task<std::string> HttpResponseImpl::ResponseBody() {
             co_return respBody;
         }
     }
-    co_return responseBody;
+    co_return {.body = responseBody, .success = responseBodyOk};
 }
 
 void HttpResponseImpl::RecvBody(const std::string &chunk) {
@@ -90,6 +93,17 @@ void HttpResponseImpl::CompletedBody() {
     {
         std::lock_guard lock{mtx};
         responseBodyComplete = true;
+    }
+    for (const auto &cl : callResponseBodyFinished) {
+        cl();
+    }
+}
+
+void HttpResponseImpl::FailedBody() {
+    {
+        std::lock_guard lock{mtx};
+        responseBodyComplete = true;
+        responseBodyOk = false;
     }
     for (const auto &cl : callResponseBodyFinished) {
         cl();
@@ -153,7 +167,7 @@ size_t HttpClientConnectionHandler::AcceptInput(const std::string &input) {
             std::lock_guard lock{mtx};
             closeConnection = true;
             inflightRequests.reserve(this->inflightRequests.size());
-            for (auto &&req : inflightRequests) {
+            for (auto &&req : this->inflightRequests) {
                 inflightRequests.emplace_back(std::move(req));
             }
             this->inflightRequests.clear();
@@ -164,6 +178,27 @@ size_t HttpClientConnectionHandler::AcceptInput(const std::string &input) {
         }
     }
     return 0;
+}
+
+void HttpClientConnectionHandler::EndOfConnection() {
+    if (responseBodyRemaining > 0) {
+        responseBodyPending->FailedBody();
+        responseBodyPending = {};
+    }
+    decltype(this->inflightRequests) inflightRequests{};
+    {
+        std::lock_guard lock{mtx};
+        closeConnection = true;
+        inflightRequests.reserve(this->inflightRequests.size());
+        for (auto &&req : this->inflightRequests) {
+            inflightRequests.emplace_back(std::move(req));
+        }
+        this->inflightRequests.clear();
+    }
+    for (auto &req : inflightRequests) {
+        std::shared_ptr<HttpResponse> response{};
+        req->callback(response);
+    }
 }
 
 void HttpClientConnectionHandler::WaitForResponse(const std::string &requestMethod, const std::function<void (std::shared_ptr<HttpResponse> &response)> &callback) {
@@ -179,6 +214,7 @@ private:
 public:
     HttpClientConnectionHandlerProxy(const std::shared_ptr<HttpClientImpl> &httpClient, const std::function<void(const std::string &)> &output, const std::function<void()> &close) : handler(std::make_shared<HttpClientConnectionHandler>(httpClient, output, close)) {}
     size_t AcceptInput(const std::string &) override;
+    void EndOfConnection() override;
     std::shared_ptr<HttpClientConnectionHandler> GetHandler() const {
         return handler;
     }
@@ -186,6 +222,10 @@ public:
 
 size_t HttpClientConnectionHandlerProxy::AcceptInput(const std::string &chunk) {
     return handler->AcceptInput(chunk);
+}
+
+void HttpClientConnectionHandlerProxy::EndOfConnection() {
+    handler->EndOfConnection();
 }
 
 NetwConnectionHandler *

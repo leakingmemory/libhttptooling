@@ -26,6 +26,7 @@ private:
 public:
     HttpServerConnectionHandler(const std::shared_ptr<HttpServerImpl> &httpServer, const std::function<void(const std::string &)> &output, const std::function<void()> &close) : httpServer(httpServer), output(output), close(close) {}
     size_t AcceptInput(const std::string &) override;
+    void EndOfConnection() override;
     void RunOutputs();
 };
 

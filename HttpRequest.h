@@ -11,6 +11,11 @@
 
 class HttpClientImpl;
 
+struct HttpRequestBody {
+    std::string content{};
+    bool success{true};
+};
+
 class HttpRequest {
     friend HttpClientImpl;
 protected:
@@ -21,7 +26,7 @@ public:
     virtual std::string GetMethod() const = 0;
     virtual std::string GetPath() const = 0;
     virtual void Respond(const std::shared_ptr<HttpResponse> &) = 0;
-    virtual task<std::string> RequestBody() = 0;
+    virtual task<HttpRequestBody> RequestBody() = 0;
     virtual void SetContent(const std::string &content, const std::string &contentType) = 0;
 };
 

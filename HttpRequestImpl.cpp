@@ -57,26 +57,37 @@ void HttpRequestImpl::CompletedBody() {
     }
 }
 
-task<std::string> HttpRequestImpl::RequestBody() {
+void HttpRequestImpl::FailedBody() {
+    {
+        std::lock_guard lock{mtx};
+        requestBodyComplete = true;
+        requestBodyFailed = true;
+    }
+    for (const auto &cl : callRequestBodyFinished) {
+        cl();
+    }
+}
+
+task<HttpRequestBody> HttpRequestImpl::RequestBody() {
     {
         std::unique_lock lock{mtx};
         if (!requestBodyComplete) {
             lock.unlock();
             std::weak_ptr<HttpRequestImpl> reqObj{shared_from_this()};
-            func_task<std::string> fnTask{[reqObj] (const auto &func) {
+            func_task<HttpRequestBody> fnTask{[reqObj] (const auto &func) {
                 auto req = reqObj.lock();
                 std::unique_lock lock{req->mtx};
                 if (req->requestBodyComplete) {
                     lock.unlock();
-                    func(req->requestBody);
+                    func({.content = req->requestBody, .success = !req->requestBodyFailed});
                     return;
                 }
                 req->callRequestBodyFinished.emplace_back([reqObj, func] () {
                     auto req = reqObj.lock();
                     if (req) {
-                        func(req->requestBody);
+                        func({.content = req->requestBody, .success = !req->requestBodyFailed});
                     } else {
-                        func("");
+                        func({.content = "", .success = false});
                     }
                 });
             }};
@@ -84,7 +95,7 @@ task<std::string> HttpRequestImpl::RequestBody() {
             co_return reqBody;
         }
     }
-    co_return requestBody;
+    co_return {.content = requestBody, .success = !requestBodyFailed};
 }
 
 void HttpRequestImpl::SetContent(const std::string &content, const std::string &contentType) {

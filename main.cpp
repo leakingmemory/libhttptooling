@@ -4,6 +4,7 @@
 #include "HttpClient.h"
 #include "include/sync_coroutine.h"
 #include "Fd.h"
+#include <iostream>
 
 static std::shared_ptr<HttpServer> server{};
 
@@ -11,7 +12,6 @@ void signal_handler(int signal) {
     server->Stop();
 }
 
-#include <iostream>
 task<void> HttpServerLoop() {
     while (true) {
         auto req = co_await server->NextRequest();
@@ -19,9 +19,17 @@ task<void> HttpServerLoop() {
         if (req->GetMethod() == "POST") {
             auto response = std::make_shared<HttpResponse>(200, "OK");
             auto reqBody = co_await req->RequestBody();
-            response->SetContent(reqBody, "text/plain");
-            std::cout << "Responding to body of size " << reqBody.size() << "\n";
-            req->Respond(response);
+            if (reqBody.success) {
+                if (reqBody.content == "close") {
+                    response->SetContent("Closing", "text/plain");
+                    req->Respond(response);
+                    server->Stop();
+                } else {
+                    response->SetContent(reqBody.content, "text/plain");
+                    std::cout << "Responding to body of size " << reqBody.content.size() << "\n";
+                    req->Respond(response);
+                }
+            }
         } else {
             auto response = std::make_shared<HttpResponse>(404, "Not found");
             response->SetContent("Not found\r\n", "text/plain");
@@ -40,7 +48,24 @@ task<void> HttpClientStuff(const std::shared_ptr<HttpClient> &clientIn) {
         auto response = responseExpected.value();
         std::cout << "Client response " << response->GetCode() << " " << response->GetDescription() << "\n";
         auto responseContent = co_await response->ResponseBody();
-        std::cout << "Client response body: " << responseContent << "\n";
+        std::cout << "Client response body: " << responseContent.body << (responseContent.success ? " (successful)" : " (error)") << "\n";
+        auto request = client->Request("POST", "/test");
+        request->SetContent("close", "text/plain");
+        std::cout << "Client request close to /test\n";
+        auto responseExpected = co_await client->Execute("127.0.0.1", 8080, request);
+        if (responseExpected.has_value()) {
+            auto response = responseExpected.value();
+            if (response) {
+                std::cout << "Client response " << response->GetCode() << " " << response->GetDescription() << "\n";
+                auto responseContent = co_await response->ResponseBody();
+                std::cout << "Client response body: " << responseContent.body
+                          << (responseContent.success ? " (successful)" : " (error)") << "\n";
+            } else {
+                std::cerr << "No response\n";
+            }
+        } else {
+            std::cerr << "Unexpected lack of response\n";
+        }
         client->Stop();
         std::cout << "Client stop requested\n";
     } else {
@@ -60,8 +85,10 @@ int main() {
         std::cout << "Client starts\n";
         client->Run();
         std::cout << "Client stopped\n";
+        client = {};
     }};
     server->Run();
     server = {};
+    std::cout << "Waiting for client stop\n";
     clientThread.join();
 }

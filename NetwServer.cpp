@@ -14,6 +14,10 @@ size_t NetwConnectionHandlerHandle::AcceptInput(const std::string &input) {
     return handler->AcceptInput(input);
 }
 
+void NetwConnectionHandlerHandle::EndOfConnection() {
+    handler->EndOfConnection();
+}
+
 NetwServer::NetwServer(int port, const std::shared_ptr<NetwProtocolHandler> &netwProtocolHandler) : outputBuffers(std::make_shared<NetwFdOutputStruct>()), netwProtocolHandler(netwProtocolHandler), poller(Poller::Create()) {
     auto pipefds = Fd::Pipe(true, true);
     commandInput = std::move(std::get<0>(pipefds));
@@ -47,7 +51,7 @@ std::shared_ptr<NetwServer> NetwServer::Create(const std::shared_ptr<NetwProtoco
 void NetwServer::HandleCommand(Poller &poller, NetwFdOutputStruct &outputBuffers) {
     while (!commandBuffer.empty()) {
         auto ch = commandBuffer[0];
-        commandBuffer.erase(0);
+        commandBuffer.erase(0, 1);
         if (ch == 'q') {
             quitCommandReceived = true;
         } else if (ch == 'w') {
@@ -195,6 +199,7 @@ task<void> NetwServer::CommandReadLoop(const std::shared_ptr<Poller> &pollerIn, 
     for (const auto &cb : cbs) {
         cb();
     }
+    quitPolling = true;
     co_return;
 }
 
@@ -232,6 +237,7 @@ task<void> NetwServer::PollLoop(const std::shared_ptr<NetwServer> &selfptrIn, co
                     }
                     std::vector<std::shared_ptr<NetwClient>> updateInputClients{};
                     std::vector<std::shared_ptr<NetwClient>> handleInputClients{};
+                    std::vector<std::shared_ptr<NetwClient>> handleEofClients{};
                     {
                         std::lock_guard lock{mtx};
                         auto iterator = clients.begin();
@@ -260,13 +266,17 @@ task<void> NetwServer::PollLoop(const std::shared_ptr<NetwServer> &selfptrIn, co
                                 try {
                                     auto rdCount = client->fd.Read(buf);
                                     if (rdCount > 0) {
-                                        std::cout << "Read " << rdCount << " bytes.\n";
                                         buf.resize(rdCount);
                                         client->inputBuffer.append(buf);
                                     }
-                                } catch (const FdException &e) {
-                                    std::cout << "Error reading from socket, closing\n";
+                                } catch (const EofException &e) {
                                     poller->RemoveFd(client->fd);
+                                    handleEofClients.emplace_back(client);
+                                    iterator = clients.erase(iterator);
+                                    continue;
+                                } catch (const FdException &e) {
+                                    poller->RemoveFd(client->fd);
+                                    handleEofClients.emplace_back(client);
                                     iterator = clients.erase(iterator);
                                     continue;
                                 }
@@ -286,6 +296,16 @@ task<void> NetwServer::PollLoop(const std::shared_ptr<NetwServer> &selfptrIn, co
                                 client->inputBuffer.erase(0, consumed);
                             }
                         } while (consumed > 0 && !client->inputBuffer.empty());
+                    }
+                    for (const auto &client : handleEofClients) {
+                        size_t consumed;
+                        do {
+                            consumed = client->handle.AcceptInput(client->inputBuffer);
+                            if (consumed > 0) {
+                                client->inputBuffer.erase(0, consumed);
+                            }
+                        } while (consumed > 0 && !client->inputBuffer.empty());
+                        client->handle.EndOfConnection();
                     }
                     std::lock_guard lock{mtx};
                     for (const auto &client : updateInputClients) {

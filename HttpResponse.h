@@ -8,6 +8,11 @@
 #include <string>
 #include "include/task.h"
 
+struct ResponseBodyResult {
+    std::string body{};
+    bool success{true};
+};
+
 class HttpResponse {
 private:
     std::string content;
@@ -40,7 +45,7 @@ public:
         this->content = std::move(content);
         this->contentType = std::move(contentType);
     }
-    virtual task<std::string> ResponseBody();
+    virtual task<ResponseBodyResult> ResponseBody();
 };
 
 #endif //LIBHTTPTOOLING_HTTPRESPONSE_H

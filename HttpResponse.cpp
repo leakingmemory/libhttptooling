@@ -5,8 +5,8 @@
 #include "HttpResponse.h"
 
 
-task<std::string> HttpResponse::ResponseBody() {
+task<ResponseBodyResult> HttpResponse::ResponseBody() {
     std::string content{this->content};
-    func_task<std::string> fnTask{[content] (const auto &fn) { fn(content); }};
+    func_task<ResponseBodyResult> fnTask{[content] (const auto &fn) { fn({.body = content, .success = true}); }};
     co_return co_await fnTask;
 }

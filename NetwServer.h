@@ -16,6 +16,7 @@ class NetwConnectionHandler {
 public:
     virtual ~NetwConnectionHandler() = default;
     virtual size_t AcceptInput(const std::string &) = 0;
+    virtual void EndOfConnection() = 0;
 };
 
 class NetwServer;
@@ -59,6 +60,7 @@ public:
         }
     }
     size_t AcceptInput(const std::string &input);
+    void EndOfConnection();
 };
 
 struct NetwClient {

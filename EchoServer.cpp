@@ -11,11 +11,15 @@ private:
 public:
     EchoConnectionHandler(const std::function<void(const std::string &)> &output, const std::function<void()> &close) : output(output), close(close) {}
     size_t AcceptInput(const std::string &) override;
+    void EndOfConnection() override;
 };
 
 size_t EchoConnectionHandler::AcceptInput(const std::string &input) {
     output(input);
     return input.size();
+}
+
+void EchoConnectionHandler::EndOfConnection() {
 }
 
 NetwConnectionHandler *

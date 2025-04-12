@@ -25,6 +25,7 @@ private:
     std::string contentType{};
     std::vector<std::function<void ()>> callRequestBodyFinished{};
     bool requestBodyComplete;
+    bool requestBodyFailed{false};
 public:
     HttpRequestImpl(const std::shared_ptr<HttpServerConnectionHandler> &serverConnectionHandler, std::shared_ptr<HttpServerResponseContainer> &serverResponseContainer, const std::string &method, const std::string &path, bool hasRequestBody) : serverConnectionHandler(serverConnectionHandler), serverResponseContainer(serverResponseContainer), method(method), path(path), requestBodyComplete(!hasRequestBody) {
         std::transform(this->method.cbegin(), this->method.cend(), this->method.begin(), [] (char ch) {return std::toupper(ch);});
@@ -39,9 +40,10 @@ public:
     std::string GetMethod() const override;
     std::string GetPath() const override;
     void Respond(const std::shared_ptr<HttpResponse> &) override;
-    task<std::string> RequestBody() override;
+    task<HttpRequestBody> RequestBody() override;
     void RecvBody(const std::string &chunk);
     void CompletedBody();
+    void FailedBody();
     void SetContent(const std::string &content, const std::string &contentType) override;
 };
 

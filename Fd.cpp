@@ -134,8 +134,10 @@ size_t Fd::Read(void *ptr, size_t size) const {
         return 0;
     }
     auto res = read(fd, ptr, size);
-    if (res >= 0) {
+    if (res > 0) {
         return res;
+    } else if (res == 0) {
+        throw EofException();
     } else {
         if (errno == EAGAIN) {
             return 0;

@@ -108,6 +108,20 @@ size_t HttpServerConnectionHandler::AcceptInput(const std::string &input) {
     return 0;
 }
 
+void HttpServerConnectionHandler::EndOfConnection() {
+    if (requestBodyRemaining > 0) {
+        requestBodyPending->FailedBody();
+        requestBodyPending = {};
+    }
+    if (closeConnection) {
+        return;
+    }
+    {
+        std::lock_guard lock{mtx};
+        closeConnection = true;
+    }
+}
+
 void HttpServerConnectionHandler::RunOutputs() {
     std::vector<std::shared_ptr<HttpServerResponseContainer>> responses{};
     bool done;
@@ -141,10 +155,15 @@ private:
 public:
     HttpServerConnectionHandlerProxy(const std::shared_ptr<HttpServerImpl> &httpServer, const std::function<void(const std::string &)> &output, const std::function<void()> &close) : handler(std::make_shared<HttpServerConnectionHandler>(httpServer, output, close)) {}
     size_t AcceptInput(const std::string &) override;
+    void EndOfConnection() override;
 };
 
 size_t HttpServerConnectionHandlerProxy::AcceptInput(const std::string &input) {
     return handler->AcceptInput(input);
+}
+
+void HttpServerConnectionHandlerProxy::EndOfConnection() {
+    handler->EndOfConnection();
 }
 
 NetwConnectionHandler *
