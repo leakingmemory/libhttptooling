@@ -34,7 +34,15 @@ add_library(httptooling OBJECT
         HttpServerResponseContainer.h
         HttpServerConnectionHandler.h
         HttpClient.cpp
-        HttpClient.h)
+        HttpClient.h
+        HttpsClientImpl.cpp
+        HttpsClientImpl.h
+        HttpsClient.cpp
+        HttpsClient.h)
+
+add_executable(HttpsClientTest main.cpp)
+
+target_link_libraries(HttpsClientTest PRIVATE httptooling -lssl)
 
 add_executable(ClientServerTest ClientServerTest.cpp)
 

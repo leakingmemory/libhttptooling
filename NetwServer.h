@@ -19,13 +19,22 @@ public:
     virtual void EndOfConnection() = 0;
 };
 
-class NetwServer;
+class NetwServerInterface {
+public:
+    NetwServerInterface() = default;
+    NetwServerInterface(const NetwServerInterface &) = delete;
+    NetwServerInterface(NetwServerInterface &&) = delete;
+    NetwServerInterface &operator =(const NetwServerInterface &) = delete;
+    NetwServerInterface &operator =(NetwServerInterface &&) = delete;
+    virtual ~NetwServerInterface() = default;
+    virtual void Connect(const void *ipaddr_norder, size_t ipaddr_len, int port, const std::string &requestData, const std::function<void (NetwConnectionHandler *)> &) = 0;
+};
 
 class NetwProtocolHandler {
 public:
     virtual NetwConnectionHandler *Create(const std::function<void (const std::string &)> &output, const std::function<void ()> &close) = 0;
     virtual void Release(NetwConnectionHandler *) = 0;
-    virtual void SetAssociatedNetwServer(const std::weak_ptr<NetwServer> &) = 0;
+    virtual void SetAssociatedNetwServer(const std::weak_ptr<NetwServerInterface> &) = 0;
 };
 
 class NetwConnectionHandlerHandle {
@@ -84,7 +93,7 @@ struct NetwFdOutputStruct {
     bool signaled{false};
 };
 
-class NetwServer : public std::enable_shared_from_this<NetwServer> {
+class NetwServer : public NetwServerInterface, public std::enable_shared_from_this<NetwServer> {
 private:
     Fd commandInput, commandMonitor, serverSocket;
     std::vector<std::shared_ptr<NetwClient>> clients{};

@@ -238,7 +238,7 @@ void HttpClientImpl::Release(NetwConnectionHandler *handler) {
     delete handler;
 }
 
-void HttpClientImpl::SetAssociatedNetwServer(const std::weak_ptr<NetwServer> &netwServer) {
+void HttpClientImpl::SetAssociatedNetwServer(const std::weak_ptr<NetwServerInterface> &netwServer) {
     this->netwServer = netwServer;
 }
 
@@ -246,7 +246,6 @@ std::shared_ptr<HttpRequest> HttpClientImpl::Request(const std::string &method, 
     return std::make_shared<HttpRequestImpl>(method, path);
 }
 
-#include <iostream>
 task<std::expected<std::shared_ptr<HttpResponse>,FdException>> HttpClientImpl::Execute(const std::string &host, int port, const std::shared_ptr<HttpRequest> &request) {
     auto netwServer = this->netwServer.lock();
     if (!netwServer) {

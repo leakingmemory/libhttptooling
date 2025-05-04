@@ -176,7 +176,7 @@ void HttpServerImpl::Release(NetwConnectionHandler *handler) {
     delete handler;
 }
 
-void HttpServerImpl::SetAssociatedNetwServer(const std::weak_ptr<NetwServer> &) {
+void HttpServerImpl::SetAssociatedNetwServer(const std::weak_ptr<NetwServerInterface> &) {
 }
 
 task<std::shared_ptr<HttpRequest>> HttpServerImpl::NextRequest() {

@@ -21,7 +21,7 @@ private:
 public:
     NetwConnectionHandler *Create(const std::function<void (const std::string &)> &output, const std::function<void ()> &close) override;
     void Release(NetwConnectionHandler *) override;
-    void SetAssociatedNetwServer(const std::weak_ptr<NetwServer> &) override;
+    void SetAssociatedNetwServer(const std::weak_ptr<NetwServerInterface> &) override;
     task<std::shared_ptr<HttpRequest>> NextRequest();
 };
 
